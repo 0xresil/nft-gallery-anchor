@@ -7,9 +7,13 @@ use solana_program::{
     program_error::ProgramError,
     msg
 };
+use spl_token_metadata::{
+    instruction::{ update_metadata_accounts },
+    state::{Metadata},
+};
+
 use borsh::{BorshDeserialize, BorshSerialize};
 declare_id!("Dw96F8NjN84googpni4mtSnCuAud9XkaPUFM1RJX53cK");
-
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct NFTRecord{
@@ -21,12 +25,11 @@ pub struct NFTRecord{
 }
 pub const NFT_COUNT: usize = 12;
 pub const NFT_RECORD_SIZE: usize = 250; // 133
+pub const REPO_ACCOUNT_SEED: &str = "hallofheros";
 
 #[program]
 pub mod hall_of_hero {
     use super::*;
-
-    const REPO_ACCOUNT_SEED: &[u8] = b"hallofheros";
 
     pub fn add_record(
         ctx: Context<AddRecord>,
@@ -52,6 +55,13 @@ pub mod hall_of_hero {
         new_price: u64,
     ) -> ProgramResult {
         
+        // verify initializer authority. initializer should be admin
+        verify_admin_authority(
+            ctx.accounts.initializer.key,
+            ctx.accounts.repository.key,
+            ctx.program_id
+        )?;
+
         // get nft listed price from repository account
         let mut nft_record = get_nft_data_from_repository(
             hero_id, 
@@ -74,10 +84,26 @@ pub mod hall_of_hero {
         dead_uri: String,
         dead_name: String
     ) -> ProgramResult {
+
+        // verify initializer authority. initializer should be admin
+        verify_admin_authority(
+            ctx.accounts.initializer.key,
+            ctx.accounts.repository.key,
+            ctx.program_id
+        )?;
+
         token::transfer(
             ctx.accounts.into_transfer_nft_context(),
             1
         );
+
+        // 4. update metadata of dead nft
+        update_metadata_old_nft(
+            &ctx,
+            dead_uri,
+            dead_name
+        )?;
+        
         // get nft listed price from repository account
         let mut nft_record = get_nft_data_from_repository(
             hero_id, 
@@ -107,7 +133,7 @@ pub mod hall_of_hero {
 pub struct AddRecord<'info> {
     #[account(signer)]
     pub initializer: AccountInfo<'info>,
-    #[account(mut)]
+    #[account(mut, owner = program_id)]
     pub repository: AccountInfo<'info>,
     pub nft_mint: AccountInfo<'info>
 }
@@ -116,9 +142,13 @@ pub struct AddRecord<'info> {
 pub struct UpdateRecord<'info> {
     #[account(signer)]
     pub initializer: AccountInfo<'info>,
-    #[account(mut)]
+    #[account(mut, owner = program_id)]
     pub repository: AccountInfo<'info>,
     pub nft_mint: AccountInfo<'info>,
+    #[account(
+        constraint = associated_token_account.owner == *initializer.key,
+        constraint = associated_token_account.mint == *nft_mint.key
+    )]
     pub associated_token_account: Account<'info, TokenAccount>,
 }
 
@@ -130,13 +160,20 @@ pub struct BuyRecord<'info> {
     pub buyer: AccountInfo<'info>,
     #[account(mut)]
     pub prev_owner: AccountInfo<'info>,
-    #[account(mut)]
+    #[account(mut, owner = program_id)]
     pub repository: AccountInfo<'info>,
     #[account(mut)]
     pub dead_nft_mint: AccountInfo<'info>,
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = dead_nft_token_account.owner == *prev_owner.key,
+        constraint = dead_nft_token_account.mint == *dead_nft_mint.key
+    )]
     pub dead_nft_token_account: Account<'info, TokenAccount>,
-    #[account(mut)]
+    #[account(
+        mut,
+        owner = *token_metadata_program.key
+    )]
     pub dead_nft_metadata_account: AccountInfo<'info>,
     #[account(mut)]
     pub new_nft_mint: AccountInfo<'info>,
@@ -202,4 +239,59 @@ fn sol_transfer<'a>(
 ) -> Result<(), ProgramError> {
     let ix = solana_program::system_instruction::transfer(source.key, destination.key, amount);
     invoke(&ix, &[source, destination, system_program])
+}
+
+// verify repository editable authority
+fn verify_admin_authority<'a>(
+    admin_account_pk: &Pubkey,
+    repository_account_pk: &Pubkey,
+    program_id: &Pubkey
+) -> Result<(), ProgramError> {
+
+    // verify seed matching - it means verify edit authority of signer
+    let expected_repo_account_pubkey = Pubkey::create_with_seed(
+        admin_account_pk, REPO_ACCOUNT_SEED, program_id
+    )?;
+
+    if expected_repo_account_pubkey != *repository_account_pk {
+        msg!("Illegal Admin! Seed dismatch. No authority to modify me.");
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
+    Ok(())
+}
+
+// update metadata account
+fn update_metadata_old_nft<'a>(
+    ctx: &Context<BuyRecord>,
+    dead_uri: String,
+    dead_name: String
+) -> Result<(), ProgramError> {
+    
+    let mut old_metadata = Metadata::from_account_info(&ctx.accounts.dead_nft_metadata_account).unwrap();
+    // verify validation of metadata account
+    if old_metadata.mint != *ctx.accounts.dead_nft_mint.key
+    {
+        msg!("nft_metadata_account is not valid account");
+        return Err(ProgramError::InvalidAccountData);
+    }
+    old_metadata.data.uri = dead_uri.to_string();
+    old_metadata.data.name = dead_name.to_string();
+    let update_metadata_instruction = update_metadata_accounts(
+        spl_token_metadata::id(),               // program_id
+        *ctx.accounts.dead_nft_metadata_account.key,          // metadata_account
+        *ctx.accounts.initializer.key,                     // update_authority
+        Some(*ctx.accounts.initializer.key),               // new_update_authority
+        Some(old_metadata.data),                // data
+        Some(true)                              // primary_sale_happened
+    );
+    invoke(
+        &update_metadata_instruction,
+        &[
+            ctx.accounts.dead_nft_metadata_account.clone(),
+            ctx.accounts.initializer.clone(),
+            ctx.accounts.dead_nft_metadata_account.clone(),
+            ctx.accounts.token_metadata_program.clone()
+        ]
+    )
 }
