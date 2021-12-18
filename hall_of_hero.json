@@ -40,7 +40,7 @@
       "name": "updateRecord",
       "accounts": [
         {
-          "name": "initializer",
+          "name": "updater",
           "isMut": false,
           "isSigner": true
         },

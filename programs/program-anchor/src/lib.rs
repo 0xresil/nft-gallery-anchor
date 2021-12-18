@@ -54,13 +54,6 @@ pub mod hall_of_hero {
         content_uri: String,
         new_price: u64,
     ) -> ProgramResult {
-        
-        // verify initializer authority. initializer should be admin
-        verify_admin_authority(
-            ctx.accounts.initializer.key,
-            ctx.accounts.repository.key,
-            ctx.program_id
-        )?;
 
         // get nft listed price from repository account
         let mut nft_record = get_nft_data_from_repository(
@@ -141,12 +134,12 @@ pub struct AddRecord<'info> {
 #[derive(Accounts)]
 pub struct UpdateRecord<'info> {
     #[account(signer)]
-    pub initializer: AccountInfo<'info>,
+    pub updater: AccountInfo<'info>,
     #[account(mut, owner = program_id)]
     pub repository: AccountInfo<'info>,
     pub nft_mint: AccountInfo<'info>,
     #[account(
-        constraint = associated_token_account.owner == *initializer.key,
+        constraint = associated_token_account.owner == *updater.key,
         constraint = associated_token_account.mint == *nft_mint.key
     )]
     pub associated_token_account: Account<'info, TokenAccount>,
