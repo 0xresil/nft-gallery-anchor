@@ -113,7 +113,7 @@ pub mod hall_of_hero {
 
         // 6. transfer sol from buyer to prev_owner
         sol_transfer(
-            ctx.accounts.buyer.clone(), 
+            ctx.accounts.buyer.to_account_info().clone(), 
             ctx.accounts.prev_owner.clone(), 
             ctx.accounts.system_program.clone(),
             nft_record.listed_price
@@ -126,16 +126,16 @@ pub mod hall_of_hero {
 pub struct AddRecord<'info> {
     #[account(signer)]
     pub initializer: AccountInfo<'info>,
-    #[account(mut, owner = program_id)]
+    #[account(mut, owner = *program_id)]
     pub repository: AccountInfo<'info>,
     pub nft_mint: AccountInfo<'info>
 }
 
 #[derive(Accounts)]
 pub struct UpdateRecord<'info> {
-    #[account(signer)]
-    pub updater: AccountInfo<'info>,
-    #[account(mut, owner = program_id)]
+    //#[account(signer)]
+    pub updater: Signer<'info>,
+    #[account(mut, owner = *program_id)]
     pub repository: AccountInfo<'info>,
     pub nft_mint: AccountInfo<'info>,
     #[account(
@@ -149,11 +149,11 @@ pub struct UpdateRecord<'info> {
 pub struct BuyRecord<'info> {
     #[account(mut, signer)]
     pub initializer: AccountInfo<'info>,
-    #[account(mut, signer)]
-    pub buyer: AccountInfo<'info>,
+    #[account(mut)]
+    pub buyer: Signer<'info>,
     #[account(mut)]
     pub prev_owner: AccountInfo<'info>,
-    #[account(mut, owner = program_id)]
+    #[account(mut, owner = *program_id)]
     pub repository: AccountInfo<'info>,
     #[account(mut)]
     pub dead_nft_mint: AccountInfo<'info>,
